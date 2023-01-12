@@ -728,7 +728,7 @@ lex_question_mark(yp_parser_t *parser) {
               parser->current.end++;
             }
           }
-          
+
           return YP_TOKEN_CHARACTER_LITERAL;
         case 'C':
           // \C-x           control character, where x is an ASCII printable character
@@ -2307,10 +2307,36 @@ parse_symbol(yp_parser_t *parser, int mode) {
 
 }
 
-// Parse an argument to alias or undef which can either be a bare word, a
+// Parse an argument to undef which can either be a bare word, a
 // symbol, or an interpolated symbol.
 static inline yp_node_t *
-parse_alias_or_undef_argument(yp_parser_t *parser) {
+parse_undef_argument(yp_parser_t *parser) {
+  switch (parser->current.type) {
+    case YP_TOKEN_IDENTIFIER: {
+      yp_token_t opening;
+      not_provided(&opening, parser->current.start);
+
+      yp_token_t closing;
+      not_provided(&closing, parser->previous.end);
+
+      parser_lex(parser);
+      return yp_node_symbol_node_create(parser, &opening, &parser->previous, &closing);
+    }
+    case YP_TOKEN_SYMBOL_BEGIN: {
+      int mode = parser->lex_modes.current->mode;
+      parser_lex(parser);
+      return parse_symbol(parser, mode);
+    }
+    default:
+      yp_error_list_append(&parser->error_list, "Expected a bare word or symbol argument.", parser->current.start - parser->start);
+      return yp_node_missing_node_create(parser, parser->current.start - parser->start);
+  }
+}
+
+// Parse an argument to alias which can either be a bare word, a
+// symbol, or an interpolated symbol.
+static inline yp_node_t *
+parse_alias_argument(yp_parser_t *parser) {
   switch (parser->current.type) {
     case YP_TOKEN_IDENTIFIER: {
       yp_token_t opening;
@@ -2504,8 +2530,8 @@ parse_expression_prefix(yp_parser_t *parser) {
       return yp_node_source_line_node_create(parser, &parser->previous);
     case YP_TOKEN_KEYWORD_ALIAS: {
       yp_token_t keyword = parser->previous;
-      yp_node_t *left = parse_alias_or_undef_argument(parser);
-      yp_node_t *right = parse_alias_or_undef_argument(parser);
+      yp_node_t *left = parse_alias_argument(parser);
+      yp_node_t *right = parse_alias_argument(parser);
 
       return yp_node_alias_node_create(parser, &keyword, left, right);
     }
@@ -2746,13 +2772,13 @@ parse_expression_prefix(yp_parser_t *parser) {
       yp_token_t keyword = parser->previous;
       yp_node_t *undef = yp_node_undef_node_create(parser, &keyword);
 
-      yp_node_t *name = parse_alias_or_undef_argument(parser);
+      yp_node_t *name = parse_undef_argument(parser);
       if (name->type == YP_NODE_MISSING_NODE) return undef;
 
       yp_node_list_append(parser, undef, &undef->as.undef_node.names, name);
 
       while (accept(parser, YP_TOKEN_COMMA)) {
-        name = parse_alias_or_undef_argument(parser);
+        name = parse_undef_argument(parser);
         if (name->type == YP_NODE_MISSING_NODE) return undef;
 
         yp_node_list_append(parser, undef, &undef->as.undef_node.names, name);
@@ -3135,7 +3161,7 @@ parse_expression_prefix(yp_parser_t *parser) {
       while (parser->current.type != YP_TOKEN_EOF && parser->current.type != YP_TOKEN_REGEXP_END) {
         yp_node_t *part;
         if ((part = parse_string_part(parser)) != NULL) {
-          yp_node_list_append(parser, node, &node->as.interpolated_regular_expression_node.parts, part); 
+          yp_node_list_append(parser, node, &node->as.interpolated_regular_expression_node.parts, part);
         }
       }
 
@@ -3207,7 +3233,7 @@ parse_expression_prefix(yp_parser_t *parser) {
         while (parser->current.type != YP_TOKEN_STRING_END && parser->current.type != YP_TOKEN_EOF) {
           yp_node_t *part;
           if ((part = parse_string_part(parser)) != NULL) {
-            yp_node_list_append(parser, interpolated, &interpolated->as.interpolated_string_node.parts, part); 
+            yp_node_list_append(parser, interpolated, &interpolated->as.interpolated_string_node.parts, part);
           }
         }
 
