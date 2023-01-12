@@ -1,4 +1,5 @@
 #include "yarp.h"
+#include "ast.h"
 
 #define STRINGIZE0(expr) #expr
 #define STRINGIZE(expr) STRINGIZE0(expr)
@@ -2334,7 +2335,7 @@ parse_undef_argument(yp_parser_t *parser) {
 }
 
 // Parse an argument to alias which can either be a bare word, a
-// symbol, or an interpolated symbol.
+// symbol, an interpolated symbol or a global variable.
 static inline yp_node_t *
 parse_alias_argument(yp_parser_t *parser) {
   switch (parser->current.type) {
@@ -2353,8 +2354,14 @@ parse_alias_argument(yp_parser_t *parser) {
       parser_lex(parser);
       return parse_symbol(parser, mode);
     }
+    case YP_TOKEN_BACK_REFERENCE:
+    case YP_TOKEN_NTH_REFERENCE:
+    case YP_TOKEN_GLOBAL_VARIABLE: {
+      parser_lex(parser);
+      return yp_node_global_variable_read_create(parser, &parser->previous);
+    }
     default:
-      yp_error_list_append(&parser->error_list, "Expected a bare word or symbol argument.", parser->current.start - parser->start);
+      yp_error_list_append(&parser->error_list, "Expected a bare word, symbol or global variable argument.", parser->current.start - parser->start);
       return yp_node_missing_node_create(parser, parser->current.start - parser->start);
   }
 }
@@ -2532,6 +2539,47 @@ parse_expression_prefix(yp_parser_t *parser) {
       yp_token_t keyword = parser->previous;
       yp_node_t *left = parse_alias_argument(parser);
       yp_node_t *right = parse_alias_argument(parser);
+
+      switch (left->type) {
+        case YP_NODE_SYMBOL_NODE:
+        case YP_NODE_INTERPOLATED_SYMBOL_NODE: {
+          switch (right->type) {
+            case YP_NODE_SYMBOL_NODE:
+            case YP_NODE_INTERPOLATED_SYMBOL_NODE: {
+              break;
+            }
+            default: {
+              yp_error_list_append(&parser->error_list, "Expected a bare word or symbol argument.", parser->previous.start - parser->start);
+            }
+          }
+          break;
+        }
+        case YP_NODE_GLOBAL_VARIABLE_READ: {
+          if (right->type == YP_NODE_GLOBAL_VARIABLE_READ) {
+            switch(right->as.global_variable_read.name.type) {
+              case YP_TOKEN_BACK_REFERENCE:
+              case YP_TOKEN_GLOBAL_VARIABLE: {
+                break;
+              }
+              case YP_TOKEN_NTH_REFERENCE: {
+                yp_error_list_append(&parser->error_list, "Can't make alias for number variables.", parser->previous.start - parser->start);
+                break;
+              }
+              default: {
+                // Cannot hit here.
+                return NULL;
+              }
+            }
+          } else {
+            yp_error_list_append(&parser->error_list, "Expected a global variable.", parser->previous.start - parser->start);
+          }
+          break;
+        }
+        default: {
+          // Cannot hit here.
+          return NULL;
+        }
+      }
 
       return yp_node_alias_node_create(parser, &keyword, left, right);
     }
